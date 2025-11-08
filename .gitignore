@@ -1,0 +1,10 @@
+# Bỏ qua toàn bộ dữ liệu WordPress và Database ở gốc
+/db_data/
+/wp_data/
+
+# Bỏ qua dữ liệu của POC
+/wp_poc/wp_data/
+
+# Bỏ qua các file hệ thống
+.DS_Store
+.vscode/

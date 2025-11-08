@@ -1,43 +1,36 @@
-# 
-
 version: '3.8'
-
 services:
   db:
     image: mysql:5.7
-    container_name: lp_db
-    restart: always
     environment:
       MYSQL_ROOT_PASSWORD: rootpass
       MYSQL_DATABASE: wordpress
       MYSQL_USER: wpuser
       MYSQL_PASSWORD: wppass
     volumes:
-      - ./db_data:/var/lib/mysql
+      - db_data_poc:/var/lib/mysql
 
   wordpress:
-    # 
-    build: . 
-    container_name: lp_wp
+    build: .
     depends_on:
       - db
-      - mailhog # add config
-    restart: always
     ports:
-      - "8081:80"
+      - "8082:80"        # chỉnh cổng khác so với site chính
     environment:
       WORDPRESS_DB_HOST: db:3306
       WORDPRESS_DB_USER: wpuser
       WORDPRESS_DB_PASSWORD: wppass
       WORDPRESS_DB_NAME: wordpress
+      XDEBUG_MODE: debug
     volumes:
       - ./wp_data:/var/www/html
-      # Mount file config
-      - ./xdebug.ini:/usr/local/etc/php/conf.d/docker-php-ext-xdebug.ini
+    restart: unless-stopped
 
-  mailhog: # add service
+  mailhog:
     image: mailhog/mailhog
-    container_name: lp_mailhog
     ports:
-      - "1025:1025" # Port SMTP 
-      - "8025:8025" # Port Web UI 
+      - "8026:8025"
+      - "1026:1025"
+
+volumes:
+  db_data_poc:
